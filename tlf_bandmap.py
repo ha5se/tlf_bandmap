@@ -84,6 +84,7 @@ class TlfBandmap(QWidget):
         self.pan_base_f1 = None
         self.pan_base_f2 = None
         self.current_frequency = 0
+        self.center_within = args.center_within
 
         self.fs_watcher = QFileSystemWatcher()
         self.fs_watcher.fileChanged.connect(self.file_changed)
@@ -105,20 +106,21 @@ class TlfBandmap(QWidget):
                                     filter(lambda b: not b.warc,
                                         BANDS)))
 
-        current_index = self.meter_list.index(self.band)
-        band_names = [f' {m:>3} m' for m in self.meter_list]
+        #current_index = self.meter_list.index(self.band)
+        #band_names = [f' {m:>3} m' for m in self.meter_list]
 
-        self.comboBox = QComboBox(self)
-        self.comboBox.setGeometry(125, 5, 70, 20)
-        self.comboBox.addItems(band_names)
-        self.comboBox.setCurrentIndex(current_index)
-        self.comboBox.currentTextChanged.connect(self.on_band_changed)
-        self.comboBox.setStyleSheet("QComboBox{"
-                                     "background-color: lightgray;"
-                                     "}")
+        #self.comboBox = QComboBox(self)
+        #self.comboBox.setGeometry(125, 5, 70, 20)
+        #self.comboBox.addItems(band_names)
+        #self.comboBox.setCurrentIndex(current_index)
+        #self.comboBox.currentTextChanged.connect(self.on_band_changed)
+        #self.comboBox.setStyleSheet("QComboBox{"
+        #                             "background-color: lightgray;"
+        #                             "}")
 
         self.dupeSwitch = QCheckBox('Dupes', self)
-        self.dupeSwitch.setGeometry(160, 30, 70, 20)
+        #self.dupeSwitch.setGeometry(160, 30, 70, 20)
+        self.dupeSwitch.setGeometry(160, 5, 70, 20)
         self.dupeSwitch.setChecked(True)
         self.dupeSwitch.stateChanged.connect(self.on_dupe_toggled)
 
@@ -173,27 +175,50 @@ class TlfBandmap(QWidget):
         qp = QPainter()
         qp.begin(self)
         self.draw_bandmap(qp)
-        self.comboBox.setGeometry(self.size().width() - 75, 5, 70, 20)
+        #self.comboBox.setGeometry(self.size().width() - 75, 5, 70, 20)
         qp.end()
+
+    def which_band(self, f):
+        for band in BANDS:
+            if band.fmax > f:
+                return band.meter
 
     def draw_bandmap(self, qp):
         size = self.size()
         if size.width() <= 1 or size.height() <= 1:
             return
 
+        if self.current_frequency > 0:
+            band_last = self.which_band(self.f1)
+            band_curr = self.which_band(self.current_frequency)
+            if band_curr != band_last:
+                self.select_band(band_curr)	# changed band, e.g. on RIG
+
+            # ensure rig center frequency will be within bandmap boundaries
+            d = int((self.f2 - self.f1) / 2)
+            fx1 = self.current_frequency - d
+            fx2 = self.current_frequency + d
+            if self.f1 <= self.current_frequency  and  self.current_frequency <= self.f2:
+                # within boundaries -- now check how near to the middle
+                if abs(self.f1 + d - self.current_frequency) * 50 / d  >  self.center_within:
+                    self.set_range(fx1, fx2)
+            else:
+                # out of boundaries -- now adjust the boundaries
+                self.set_range(fx1, fx2)
+
         self.mutex.lock()
 
         #
         # draw frequency scale
         #
-        scale_x = size.width() * 0.25
+        scale_x = int(size.width() * 0.25)
         qp.setPen(QPen(Qt.black, 1, Qt.SolidLine))
         qp.drawLine(scale_x, 0, scale_x, size.height())
         qp.setFont(QFont('Decorative', 8))
         b = self.px_per_hz()
 
         if self.current_frequency > 0:
-            y = b * (self.current_frequency - self.f1)
+            y = int(b * (self.current_frequency - self.f1))
             qp.setBrush(QBrush(Qt.yellow, Qt.SolidPattern))
             points = QPolygon([
                 QPoint(40, y - 5),
@@ -207,14 +232,14 @@ class TlfBandmap(QWidget):
         for f in range(tf1, tf2, self.tick_minor):
             if f < self.f1 or f > self.f2:
                 continue
-            y = b * (f - self.f1)
+            y = int(b * (f - self.f1))
             tick_size = 5       # minor tick
             if (f % self.tick_major) == 0:
                 tick_size = 10  # major tick
             qp.drawLine(scale_x - tick_size, y, scale_x, y)
             if (f % self.tick_major) != 0:
                 continue
-            qp.drawText(scale_x - 45, y + 8/2, f'{int(f/1000):>5}')
+            qp.drawText(scale_x - 45, y + int(8/2), f'{int(f/1000):>5}')
 
         #
         # show spots
@@ -284,7 +309,7 @@ class TlfBandmap(QWidget):
         if os.path.exists(self.bmdata):
             self.fs_watcher.addPath(self.bmdata)
             self.file_changed(self.bmdata)
-            
+
 
     def wheelEvent(self, event):
         factor = 1.2                    # down: zoom out
@@ -452,11 +477,12 @@ def process_args():
     parser.add_argument('band', metavar='band', nargs='?', type=int,
                     choices=meters, default=40,
                     help=f'band to display {meters} (default: 40)')
+    parser.add_argument('--center_within', metavar='center_within', nargs='?', type=int, default=5,
+                    help='centering the riq frequency within 0...50 (default: 5%)')
     parser.add_argument('-d', '--dir', metavar='DIR',
                     help='working directory of Tlf (default: current directory)')
     parser.add_argument('-w', '--warc', action='store_true',
                     help='enable WARC bands')
-
     mode_group = parser.add_mutually_exclusive_group(required=False)
     mode_group.add_argument('-c', '--cw', action='store_true',
                     help='show CW segment (default)')
